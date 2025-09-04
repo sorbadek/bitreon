@@ -1,0 +1,38 @@
+[project]
+name = "bitreon"
+description = "Decentralized creator subscription platform on Stacks"
+authors = ["Bitreon Team"]
+telemetry = false
+cache_dir = "./.clarinet/cache"
+requirements = []
+
+[contracts.bitreon-core]
+path = "contracts/bitreon-core.clar"
+clarity_version = 2
+epoch = "2.4"
+
+[repl]
+costs_version = 2
+parser_version = 2
+
+[repl.analysis]
+passes = ["check_checker"]
+
+[[repl.analysis.check_checker]]
+strict = false
+trusted_sender = false
+trusted_caller = false
+callee_filter = false
+
+[networks]
+simnet = "http://localhost:20443"
+testnet = "https://api.testnet.hiro.so"
+mainnet = "https://api.hiro.so"
+
+[networks.testnet]
+node_rpc_address = "https://api.testnet.hiro.so"
+accounts = []
+
+[networks.mainnet]
+node_rpc_address = "https://api.hiro.so"
+accounts = []
