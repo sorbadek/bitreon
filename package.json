@@ -38,6 +38,7 @@
     "@radix-ui/react-toggle-group": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.6",
     "@sats-connect/core": "latest",
+    "@stacks/auth": "^7.2.0",
     "@stacks/connect": "^8.1.9",
     "@stacks/network": "^7.2.0",
     "@stacks/transactions": "^7.2.0",

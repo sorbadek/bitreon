@@ -4,8 +4,10 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { toast } from "@/components/ui/use-toast"
 import {
   Bitcoin,
   Users,
@@ -18,28 +20,49 @@ import {
   Eye,
   ArrowUpRight,
   Star,
+  Loader2,
+  AlertCircle,
 } from "lucide-react"
 import Link from "next/link"
 import { WalletConnect } from "@/components/wallet-connect"
 import { isUserSignedIn, getUserData } from "@/lib/stacks"
-import {
-  getCreatorByAddress,
-  getUserSubscriptions,
-  getCreatorPosts,
-  formatSatoshis,
-  type Creator,
-  type Subscription,
-  type Post,
-} from "@/lib/database"
+import { formatSatoshis } from "@/lib/database"
+import { 
+  getCreatorByOwner, 
+  getCreator, 
+  getUserSubscription, 
+  isUserSubscribed, 
+  type Creator as ContractCreator,
+  type Subscription as ContractSubscription,
+  useBitreonContract 
+} from "@/lib/bitreon-contract"
+
+// Local types that match our UI needs
+type Post = {
+  id: string;
+  title: string;
+  content: string;
+  is_premium: boolean;
+  timestamp: number;
+  creator_id: string;
+};
+
+type Subscription = ContractSubscription & {
+  creator?: ContractCreator;
+};
 
 export default function DashboardPage() {
   const [userType, setUserType] = useState<"creator" | "fan" | "new" | null>(null)
   const [isSignedIn, setIsSignedIn] = useState(false)
   const [userData, setUserData] = useState<any>(null)
-  const [creatorData, setCreatorData] = useState<Creator | null>(null)
+  const [creatorData, setCreatorData] = useState<ContractCreator | null>(null)
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([])
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  
+  // Initialize contract hooks
+  const { registerCreator, subscribeToCreator } = useBitreonContract()
 
   useEffect(() => {
     const checkUserStatus = async () => {
@@ -51,36 +74,41 @@ export default function DashboardPage() {
         return
       }
 
-      const user = getUserData()
-      setUserData(user)
-
       try {
-        console.log("[v0] Checking user status for:", user.profile.stxAddress.testnet)
+        setError(null)
+        const data = getUserData()
+        if (!data?.profile?.stxAddress?.testnet) {
+          throw new Error("User address not available")
+        }
+        
+        setUserData(data)
+        const userAddress = data.profile.stxAddress.testnet
 
-        const creator = await getCreatorByAddress(user.profile.stxAddress.testnet)
-        console.log("[v0] Creator result:", creator)
-
+        // Check if user is a creator
+        const creator = await getCreatorByOwner(userAddress)
         if (creator) {
-          setUserType("creator")
           setCreatorData(creator)
-
-          const creatorPosts = await getCreatorPosts(creator.id)
-          setPosts(creatorPosts)
+          setUserType("creator")
+          
+          // TODO: Load creator posts from a different source or implement in contract
+          // For now, we'll use an empty array
+          setPosts([])
         } else {
-          const userSubs = await getUserSubscriptions(user.profile.stxAddress.testnet)
-          console.log("[v0] User subscriptions:", userSubs)
-
-          if (userSubs.length > 0) {
+          // Check if user has subscriptions
+          // Note: This is a simplified approach - in a real app, you'd need to track subscriptions
+          // by querying the contract for the user's subscription NFTs or events
+          const hasActiveSubscriptions = false; // TODO: Implement actual check
+          
+          if (hasActiveSubscriptions) {
+            // TODO: Fetch actual subscriptions
             setUserType("fan")
-            setSubscriptions(userSubs)
           } else {
             setUserType("new")
           }
         }
-      } catch (error: any) {
-        console.error("[v0] Error checking user status:", error)
-        // Default to new user when there's an error
-        setUserType("new")
+      } catch (error) {
+        console.error("Error loading user data:", error)
+        setError(error instanceof Error ? error.message : "Failed to load user data")
       } finally {
         setLoading(false)
       }
@@ -91,34 +119,57 @@ export default function DashboardPage() {
 
   if (!isSignedIn) {
     return (
-      <div className="min-h-screen bg-background">
-        <header className="border-b border-border">
-          <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2">
-              <div className="w-8 h-8 bitcoin-gradient rounded-lg flex items-center justify-center">
-                <Bitcoin className="w-5 h-5 text-white" />
-              </div>
-              <h1 className="text-2xl font-bold text-foreground">Bitreon</h1>
-            </Link>
-            <WalletConnect />
-          </div>
-        </header>
-
-        <div className="container mx-auto px-4 py-20 text-center">
-          <h1 className="text-3xl font-bold text-foreground mb-4">Connect Your Wallet</h1>
-          <p className="text-muted-foreground mb-8">Please connect your wallet to access your dashboard</p>
-          <WalletConnect />
-        </div>
+      <div className="container mx-auto px-4 py-12 flex flex-col items-center justify-center min-h-[60vh] space-y-6">
+        <Shield className="h-16 w-16 text-muted-foreground" />
+        <h2 className="text-2xl font-bold">Connect your wallet</h2>
+        <p className="text-muted-foreground text-center max-w-md">
+          Connect your Stacks wallet to access your dashboard and manage your subscriptions.
+        </p>
+        <WalletConnect />
       </div>
     )
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin w-8 h-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading dashboard...</p>
+      <div className="container mx-auto px-4 py-8">
+        <div className="space-y-4">
+          <Skeleton className="h-12 w-1/3" />
+          <div className="grid gap-4 md:grid-cols-3">
+            {[1, 2, 3].map((i) => (
+              <Card key={i}>
+                <CardHeader>
+                  <Skeleton className="h-6 w-3/4" />
+                  <Skeleton className="h-4 w-1/2" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-4 w-full mb-2" />
+                  <Skeleton className="h-4 w-5/6" />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="container mx-auto px-4 py-8">
+        <div className="bg-red-50 dark:bg-red-900/20 p-4 rounded-md flex items-start space-x-3">
+          <AlertCircle className="h-5 w-5 text-red-500 mt-0.5" />
+          <div>
+            <h3 className="font-medium text-red-800 dark:text-red-200">Error loading dashboard</h3>
+            <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
+            <Button 
+              variant="outline" 
+              className="mt-2"
+              onClick={() => window.location.reload()}
+            >
+              Retry
+            </Button>
+          </div>
         </div>
       </div>
     )
@@ -153,9 +204,16 @@ export default function DashboardPage() {
   )
 }
 
-function CreatorDashboard({ creator, posts }: { creator: Creator; posts: Post[] }) {
-  const totalViews = posts.reduce((sum, post) => sum + post.likes_count * 10, 0) // Estimate views from likes
-  const monthlyEarnings = creator.total_earnings_sats * 0.3 // Estimate 30% is from this month
+function CreatorDashboard({ creator, posts }: { creator: ContractCreator; posts: Post[] }) {
+  // Format subscription price from microSTX to STX
+  const subscriptionPrice = parseInt(creator['subscription-price']) / 1000000;
+  
+  // Mock stats - in a real app, you'd query these from the contract
+  const stats = [
+    { label: "Total Subscribers", value: "0", icon: Users },
+    { label: "Monthly Revenue", value: `${subscriptionPrice} STX`, icon: TrendingUp },
+    { label: "Total Earnings", value: `${subscriptionPrice} STX`, icon: Bitcoin },
+  ]
 
   return (
     <div className="space-y-8">
@@ -180,49 +238,18 @@ function CreatorDashboard({ creator, posts }: { creator: Creator; posts: Post[] 
 
       {/* Stats Overview */}
       <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Subscribers</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{creator.subscriber_count.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">Active subscribers</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Earnings</CardTitle>
-            <Bitcoin className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatSatoshis(creator.total_earnings_sats)}</div>
-            <p className="text-xs text-muted-foreground">All time earnings</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Monthly Revenue</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatSatoshis(monthlyEarnings)}</div>
-            <p className="text-xs text-muted-foreground">This month</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Content Posts</CardTitle>
-            <Eye className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{posts.length}</div>
-            <p className="text-xs text-muted-foreground">Total published</p>
-          </CardContent>
-        </Card>
+        {stats.map((stat) => (
+          <Card key={stat.label}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
+              <stat.icon className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stat.value}</div>
+              <p className="text-xs text-muted-foreground">{stat.label}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* Recent Activity */}
@@ -275,7 +302,7 @@ function CreatorDashboard({ creator, posts }: { creator: Creator; posts: Post[] 
             {posts.length === 0 && (
               <Card>
                 <CardContent className="pt-6 text-center">
-                  <p className="text-muted-foreground">No posts yet. Create your first post to get started!</p>
+                  <p className="text-muted-foreground mb-4">No posts yet. Create your first post to get started!</p>
                   <Button className="mt-4" size="sm">
                     <Plus className="w-4 h-4 mr-2" />
                     Create Post
@@ -377,25 +404,15 @@ function FanDashboard({ subscriptions }: { subscriptions: Subscription[] }) {
             {subscriptions.map((subscription) => (
               <Card key={subscription.id}>
                 <CardHeader>
-                  <div className="flex items-center gap-4">
-                    <Avatar className="w-12 h-12">
-                      <AvatarImage src="/placeholder.svg" alt="Creator" />
-                      <AvatarFallback>CR</AvatarFallback>
+                  <div className="flex items-center space-x-4">
+                    <Avatar className="h-16 w-16">
+                      <AvatarImage src={`https://source.boringavatars.com/marble/80/${subscription.creator?.owner}?colors=264653,2a9d8f,e9c46a,f4a261,e76f51`} alt={subscription.creator?.['display-name']} />
+                      <AvatarFallback>{subscription.creator?.['display-name']?.charAt(0) || 'C'}</AvatarFallback>
                     </Avatar>
-                    <div className="flex-1">
-                      <CardTitle className="text-lg">Creator</CardTitle>
-                      <CardDescription>creator.btc</CardDescription>
+                    <div>
+                      <h1 className="text-3xl font-bold">{subscription.creator?.['display-name'] || 'Creator'}</h1>
+                      <p className="text-muted-foreground">@{subscription.creator?.['bns-name'] || subscription.creator?.owner}</p>
                     </div>
-                    <Badge
-                      className={
-                        subscription.status === "active"
-                          ? "bg-green-100 text-green-800 border-green-200"
-                          : "bg-gray-100 text-gray-800 border-gray-200"
-                      }
-                    >
-                      <Shield className="w-3 h-3 mr-1" />
-                      {subscription.status}
-                    </Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -405,11 +422,18 @@ function FanDashboard({ subscriptions }: { subscriptions: Subscription[] }) {
                       <span>{new Date(subscription.expires_at).toLocaleDateString()}</span>
                     </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Amount Paid</span>
-                      <span className="flex items-center gap-1">
-                        <Bitcoin className="w-3 h-3" />
-                        {formatSatoshis(subscription.price_paid_sats)}
-                      </span>
+                      <p className="text-sm text-muted-foreground">{subscription.creator?.bio || "No bio provided."}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {subscription.creator?.category && (
+                        <Badge variant="outline">{subscription.creator?.category}</Badge>
+                      )}
+                      <Badge variant="outline">{parseInt(subscription.price_paid_sats) / 1000000} STX/month</Badge>
+                      <Badge variant="secondary">On-chain</Badge>
+                    </div>
+                    <div className="mt-4">
+                      <h4 className="text-sm font-medium mb-1">Subscription Benefits</h4>
+                      <p className="text-sm text-muted-foreground">{subscription.creator?.benefits || 'No benefits specified.'}</p>
                     </div>
                     <div className="flex items-center justify-between text-sm">
                       <span className="text-muted-foreground">Tier</span>

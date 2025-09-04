@@ -1,4 +1,4 @@
-import { StacksMainnet, StacksTestnet } from "@stacks/network"
+import { STACKS_MAINNET, STACKS_TESTNET } from "@stacks/network"
 import {
   makeContractCall,
   broadcastTransaction,
@@ -6,11 +6,12 @@ import {
   PostConditionMode,
   uintCV,
   principalCV,
-  callReadOnlyFunction,
+  fetchCallReadOnlyFunction,
   cvToJSON,
 } from "@stacks/transactions"
 
-const network = process.env.NODE_ENV === "production" ? new StacksMainnet() : new StacksTestnet()
+// Initialize the network
+const network = process.env.NODE_ENV === 'production' ? STACKS_TESTNET : STACKS_TESTNET
 const SBTC_CONTRACT_ADDRESS = "SP3DX3H4FEYZJZ586MFBS25ZW3HZDMEW92260R2PR"
 const SBTC_CONTRACT_NAME = "Wrapped-Bitcoin"
 
@@ -46,7 +47,7 @@ export async function sendSBTCPayment(
   senderKey?: string,
 ): Promise<SBTCTransaction> {
   try {
-    const txOptions = {
+    const transaction = await makeContractCall({
       contractAddress: SBTC_CONTRACT_ADDRESS,
       contractName: SBTC_CONTRACT_NAME,
       functionName: "transfer",
@@ -59,10 +60,9 @@ export async function sendSBTCPayment(
       network,
       anchorMode: AnchorMode.Any,
       postConditionMode: PostConditionMode.Allow,
-    }
-
-    const transaction = await makeContractCall(txOptions)
-    const broadcastResponse = await broadcastTransaction(transaction, network)
+    })
+    
+    const broadcastResponse = await broadcastTransaction(transaction)
 
     return {
       txId: broadcastResponse.txid,
@@ -81,15 +81,14 @@ export async function sendSBTCPayment(
 // Get real sBTC balance from contract
 export async function getSBTCBalance(address: string): Promise<number> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await fetchCallReadOnlyFunction({
       contractAddress: SBTC_CONTRACT_ADDRESS,
       contractName: SBTC_CONTRACT_NAME,
-      functionName: "get-balance",
+      functionName: 'get-balance',
       functionArgs: [principalCV(address)],
-      network,
       senderAddress: address,
+      network,
     })
-
     const jsonResult = cvToJSON(result)
     const balanceSats = jsonResult.value?.value || 0
     return satoshisToBTC(balanceSats)
@@ -110,12 +109,20 @@ export function estimateTransactionFee(amount: number): number {
 // Check transaction status
 export async function getTransactionStatus(txId: string): Promise<string> {
   try {
-    const response = await fetch(`${network.coreApiUrl}/extended/v1/tx/${txId}`)
+    const apiUrl = process.env.NEXT_PUBLIC_STACKS_API_URL || 'https://stacks-node-api.testnet.stacks.co'
+    const response = await fetch(`${apiUrl}/extended/v1/tx/${txId}`)
+    
+    if (!response.ok) {
+      throw new Error(`Failed to fetch transaction status: ${response.statusText}`)
+    }
+    
     const txData = await response.json()
 
     if (txData.tx_status === "success") {
       return "confirmed"
-    } else if (txData.tx_status === "abort_by_response" || txData.tx_status === "abort_by_post_condition") {
+    } else if (txData.tx_status === "abort_by_response" || 
+               txData.tx_status === "abort_by_post_condition" ||
+               txData.tx_status === "aborted") {
       return "failed"
     } else {
       return "pending"
