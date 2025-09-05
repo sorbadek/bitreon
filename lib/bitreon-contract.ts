@@ -1,5 +1,5 @@
 import { 
-  callReadOnlyFunction, 
+  fetchCallReadOnlyFunction,
   cvToJSON, 
   uintCV, 
   stringAsciiCV, 
@@ -8,21 +8,42 @@ import {
   PostConditionMode,
   makeContractCall,
   broadcastTransaction,
-  AnchorMode
+  AnchorMode,
+  ClarityValue
 } from '@stacks/transactions';
-import { STACKS_TESTNET, StacksNetwork } from '@stacks/network';
+import { STACKS_TESTNET } from '@stacks/network';
+
+// Use the testnet network configuration
+const network = STACKS_TESTNET;
+
+// Helper function to call read-only functions
+async function callContractReadOnly({
+  contractAddress,
+  contractName,
+  functionName,
+  functionArgs,
+  senderAddress
+}: {
+  contractAddress: string;
+  contractName: string;
+  functionName: string;
+  functionArgs: ClarityValue[];
+  senderAddress: string;
+}) {
+  return fetchCallReadOnlyFunction({
+    contractAddress,
+    contractName,
+    functionName,
+    functionArgs,
+    senderAddress
+  });
+}
 import { useUser } from './use-user';
 
 const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || 'ST2S5RQ13X74V6D2GX9QRX7K89QMB2XTFJWFATZ6Y';
 const CONTRACT_NAME = 'bitreon-core';
 
-// Use the testnet network configuration
-const network = STACKS_TESTNET;
-
-// Override the API URL if provided
-if (process.env.NEXT_PUBLIC_STACKS_API_URL) {
-  network.coreApiUrl = process.env.NEXT_PUBLIC_STACKS_API_URL;
-}
+// Network is already initialized above
 
 // Types based on the contract interface
 export interface Creator {
@@ -77,18 +98,17 @@ export interface ContractInfo {
  */
 export async function getCreator(creatorId: number): Promise<Creator | null> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await callContractReadOnly({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'get-creator',
       functionArgs: [uintCV(creatorId)],
-      network,
-      senderAddress: CONTRACT_ADDRESS,
+      senderAddress: CONTRACT_ADDRESS // Using contract address as sender for read-only
     });
 
-    const json = cvToJSON(result);
-    if (json.value) {
-      return { ...json.value, 'creator-id': creatorId.toString() };
+    if (result) {
+      const json = cvToJSON(result);
+      return json.value as Creator;
     }
     return null;
   } catch (error) {
@@ -104,13 +124,12 @@ export async function getCreator(creatorId: number): Promise<Creator | null> {
  */
 export async function getCreatorByBNS(bnsName: string): Promise<Creator | null> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await callContractReadOnly({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'get-creator-by-bns',
       functionArgs: [stringAsciiCV(bnsName)],
-      network,
-      senderAddress: CONTRACT_ADDRESS,
+      senderAddress: CONTRACT_ADDRESS
     });
 
     const json = cvToJSON(result);
@@ -128,13 +147,12 @@ export async function getCreatorByBNS(bnsName: string): Promise<Creator | null> 
  */
 export async function getCreatorByOwner(ownerAddress: string): Promise<Creator | null> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await callContractReadOnly({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'get-creator-by-owner',
       functionArgs: [standardPrincipalCV(ownerAddress)],
-      network,
-      senderAddress: CONTRACT_ADDRESS,
+      senderAddress: CONTRACT_ADDRESS
     });
 
     const json = cvToJSON(result);
@@ -152,7 +170,7 @@ export async function getCreatorByOwner(ownerAddress: string): Promise<Creator |
  */
 export async function getSubscription(subscriptionId: number): Promise<Subscription | null> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await fetchCallReadOnlyFunction({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'get-subscription',
@@ -180,7 +198,7 @@ export async function getSubscription(subscriptionId: number): Promise<Subscript
  */
 export async function getUserSubscription(userAddress: string, creatorId: number): Promise<Subscription | null> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await fetchCallReadOnlyFunction({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'get-user-subscription',
@@ -208,7 +226,7 @@ export async function getUserSubscription(userAddress: string, creatorId: number
  */
 export async function isUserSubscribed(userAddress: string, creatorId: number): Promise<boolean> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await fetchCallReadOnlyFunction({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'is-subscribed',
@@ -234,7 +252,7 @@ export async function isUserSubscribed(userAddress: string, creatorId: number): 
  */
 export async function getContractInfo(): Promise<ContractInfo> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await fetchCallReadOnlyFunction({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'get-contract-info',
@@ -261,7 +279,7 @@ export async function getContractInfo(): Promise<ContractInfo> {
  */
 export async function getNFTCertificate(tokenId: number): Promise<NFTCertificate | null> {
   try {
-    const result = await callReadOnlyFunction({
+    const result = await fetchCallReadOnlyFunction({
       contractAddress: CONTRACT_ADDRESS,
       contractName: CONTRACT_NAME,
       functionName: 'get-nft-badge',
@@ -286,7 +304,7 @@ export async function getNFTCertificate(tokenId: number): Promise<NFTCertificate
  * Provides functions for registering as a creator and subscribing to creators
  */
 export function useBitreonContract() {
-  const { user } = useUser();
+  const { userData, userAddress } = useUser();
 
   /**
    * Register as a creator
@@ -307,42 +325,34 @@ export function useBitreonContract() {
     benefits: string,
     metadata: string = ''
   ) => {
-    if (!user) throw new Error('User not authenticated');
-    if (!user.profile || !user.profile.stxAddress) {
-      throw new Error('User address not available');
+    if (!userData || !userAddress) {
+      throw new Error('User not authenticated');
     }
 
     try {
-      const functionArgs = [
-        stringAsciiCV(bnsName),
-        stringUtf8CV(displayName),
-        stringUtf8CV(bio),
-        stringUtf8CV(category),
-        uintCV(subscriptionPrice),
-        stringUtf8CV(benefits),
-        metadata ? stringUtf8CV(metadata) : stringUtf8CV('')
-      ];
-
-      const options = {
+      const txOptions = {
         contractAddress: CONTRACT_ADDRESS,
         contractName: CONTRACT_NAME,
         functionName: 'register-creator',
-        functionArgs,
+        functionArgs: [
+          stringAsciiCV(bnsName),
+          stringUtf8CV(displayName),
+          stringUtf8CV(bio),
+          stringAsciiCV(category),
+          uintCV(subscriptionPrice),
+          stringUtf8CV(benefits),
+          metadata ? stringUtf8CV(metadata) : stringUtf8CV('')
+        ],
+        senderKey: userData.appPrivateKey,
+        validateWithAbi: true,
         network,
-        anchorMode: AnchorMode.Any,
         postConditionMode: PostConditionMode.Allow,
-        postConditions: [],
-        onFinish: (data: any) => {
-          console.log('Transaction submitted:', data);
-        },
-        onCancel: () => {
-          console.log('Transaction was canceled');
-        },
+        anchorMode: AnchorMode.Any,
       };
 
       // This would be implemented with @stacks/connect
       // For now, we'll just return a mock response
-      console.log('Registering creator with options:', options);
+      console.log('Registering creator with options:', txOptions);
       return { success: true, txId: 'mock-tx-id' };
     } catch (error) {
       console.error('Error registering creator:', error);
@@ -363,39 +373,31 @@ export function useBitreonContract() {
     autoRenew: boolean = false,
     metadata: string = ''
   ) => {
-    if (!user) throw new Error('User not authenticated');
-    if (!user.profile || !user.profile.stxAddress) {
-      throw new Error('User address not available');
+    if (!userData || !userAddress) {
+      throw new Error('User not authenticated');
     }
 
     try {
-      const functionArgs = [
-        uintCV(creatorId),
-        uintCV(duration),
-        autoRenew,
-        metadata ? stringUtf8CV(metadata) : stringUtf8CV('')
-      ];
-
-      const options = {
+      const txOptions = {
         contractAddress: CONTRACT_ADDRESS,
         contractName: CONTRACT_NAME,
         functionName: 'subscribe',
-        functionArgs,
+        functionArgs: [
+          uintCV(creatorId),
+          uintCV(duration),
+          autoRenew ? stringAsciiCV('true') : stringAsciiCV('false'),
+          metadata ? stringUtf8CV(metadata) : stringUtf8CV('')
+        ],
+        senderKey: userData.appPrivateKey,
+        validateWithAbi: true,
         network,
-        anchorMode: AnchorMode.Any,
-        postConditionMode: PostConditionMode.Deny,
-        postConditions: [],
-        onFinish: (data: any) => {
-          console.log('Subscription transaction submitted:', data);
-        },
-        onCancel: () => {
-          console.log('Subscription was canceled');
-        },
+        postConditionMode: PostConditionMode.Allow,
+        anchorMode: AnchorMode.Any
       };
 
       // This would be implemented with @stacks/connect
       // For now, we'll just return a mock response
-      console.log('Subscribing with options:', options);
+      console.log('Subscribing with options:', txOptions);
       return { success: true, txId: 'mock-tx-id' };
     } catch (error) {
       console.error('Error subscribing to creator:', error);
